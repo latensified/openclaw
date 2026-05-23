@@ -94,4 +94,60 @@ describe("bootstrap-extra-files hook", () => {
     await handler(event);
     expect(context.bootstrapFiles.map((f) => f.name).toSorted()).toEqual(["AGENTS.md", "TOOLS.md"]);
   });
+
+  it("keeps shared customization regressions visible across run kinds", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-bootstrap-extra-custom-");
+    const customizationDir = path.join(tempDir, "customizations");
+    await fs.mkdir(customizationDir, { recursive: true });
+    await fs.writeFile(
+      path.join(customizationDir, "AGENTS.md"),
+      [
+        "signature presence: require the canonical visible reply signature",
+        "task capture: persist requested work before replying",
+      ].join("\n"),
+      "utf-8",
+    );
+    await fs.writeFile(
+      path.join(customizationDir, "TOOLS.md"),
+      "selector persistence: keep durable selector choices before acting",
+      "utf-8",
+    );
+    await fs.writeFile(
+      path.join(customizationDir, "MEMORY.md"),
+      "memory hydration: load private long-term memory only in main sessions",
+      "utf-8",
+    );
+
+    const cfg = createBootstrapExtraConfig([
+      "customizations/AGENTS.md",
+      "customizations/TOOLS.md",
+      "customizations/MEMORY.md",
+    ]);
+    const sessions = [
+      "agent:main:main",
+      "agent:main:cron:daily:run:run-1",
+      "agent:main:subagent:abc",
+    ];
+
+    for (const sessionKey of sessions) {
+      const context = await createBootstrapContext({
+        workspaceDir: tempDir,
+        cfg,
+        sessionKey,
+        rootFiles: [
+          { name: "AGENTS.md", content: "root agents" },
+          { name: "TOOLS.md", content: "root tools" },
+        ],
+      });
+
+      const event = createHookEvent("agent", "bootstrap", sessionKey, context);
+      await handler(event);
+
+      const content = context.bootstrapFiles.map((f) => f.content ?? "").join("\n");
+      expect(content).toContain("signature presence");
+      expect(content).toContain("task capture");
+      expect(content).toContain("selector persistence");
+      expect(content.includes("memory hydration")).toBe(sessionKey === "agent:main:main");
+    }
+  });
 });
